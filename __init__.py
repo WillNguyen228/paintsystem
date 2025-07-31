@@ -19,10 +19,11 @@ from .paint_system import PaintSystem, get_paint_system_images
 from .common import import_legacy_updater, is_newer_than
 from .custom_icons import load_custom_icons, unload_custom_icons
 from . import auto_load
+from . import paintsystem_reference
 
 bl_info = {
     "name": "Paint System",
-    "author": "Tawan Sunflower, @blastframe",
+    "author": "Tawan Sunflower, @blastframe, @Skygazer123321",
     "description": "",
     "blender": (4, 1, 0),
     "version": (1, 3, 4),
@@ -78,11 +79,13 @@ submodules = [
     "operators_utils",
     "operators_bake",
     "panels",
+    "paintsystem_reference",
     # "tests",
     # "node_organizer",
     # "operation/test",
 ]
 
+#This  line automatically registers and unregisters all the submodules you listed
 _register, _unregister = register_submodule_factory(__name__, submodules)
 
 

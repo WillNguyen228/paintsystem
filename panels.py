@@ -317,7 +317,14 @@ class MAT_PT_PaintSystemQuickToolsPaint(Panel):
             row.scale_y = 1.5
             row.scale_x = 1.5
         row.operator("paint_system.quick_edit", text="Edit Externally", icon='IMAGE')
-
+        
+        row = layout.row()
+        if not ps.preferences.use_compact_design:
+            row.scale_y = 1.5
+            row.scale_x = 1.5
+        #row.operator("wm.open_mainfile", text="TEST WORKS", icon="FILE_FOLDER")
+        #row.operator("paintsystem.reference_popup", text="Open Reference Viewer", icon="FILE_FOLDER") #IMAGE_REFERENCE
+        row.operator("paintsystem.open_reference_window", text="Open Reference Image", icon="FILE_FOLDER")
 
 class MATERIAL_UL_PaintSystemMatSlots(UIList):
     
