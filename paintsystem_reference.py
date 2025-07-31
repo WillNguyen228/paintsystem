@@ -4,6 +4,9 @@ from bpy.props import PointerProperty
 import bpy
 import os
 
+import gpu
+from gpu_extras.batch import batch_for_shader
+
 # Property group to hold reference image
 class PaintSystemReferenceSettings(PropertyGroup):
     reference_image: PointerProperty(
@@ -12,6 +15,88 @@ class PaintSystemReferenceSettings(PropertyGroup):
         description="Image used for reference"
     )
 
+# Modal operator to draw rectangle
+class PAINTSYSTEM_OT_DrawRectangle(Operator):
+    bl_idname = "paintsystem.draw_rectangle"
+    bl_label = "Draw Selection Rectangle"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    _handle = None
+    _start_mouse = None
+    _end_mouse = None
+    _drawing = False
+
+    def modal(self, context, event):
+        print("Mouse event:", event.type, event.mouse_region_x, event.mouse_region_y)
+        if context.area:
+            context.area.tag_redraw()
+
+        if event.type == 'LEFTMOUSE':
+            if event.value == 'PRESS':
+                self._start_mouse = (event.mouse_region_x, event.mouse_region_y)
+                self._end_mouse = self._start_mouse
+                self._drawing = True
+            elif event.value == 'RELEASE':
+                #self.finish()
+                #return {'FINISHED'}
+                self._drawing = False
+                self._start_mouse = None
+                self._end_mouse = None
+                # Keep running modal to allow drawing more rectangles
+
+        elif event.type == 'MOUSEMOVE' and self._drawing:
+            self._end_mouse = (event.mouse_region_x, event.mouse_region_y)
+
+        elif event.type in {'RIGHTMOUSE', 'ESC'}:
+            self.finish()
+            return {'CANCELLED'}
+
+        return {'RUNNING_MODAL'}
+
+    def invoke(self, context, event):
+        print("Rectangle tool started")
+        if context.area.type != 'IMAGE_EDITOR':
+            self.report({'WARNING'}, "This operator only works in the Image Editor")
+            return {'CANCELLED'}
+
+        self._start_mouse = None
+        self._end_mouse = None
+        self._drawing = False
+
+        self._handle = bpy.types.SpaceImageEditor.draw_handler_add(
+            self.draw_callback, (context,), 'WINDOW', 'POST_PIXEL'
+        )
+
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def finish(self):
+        if self._handle:
+            bpy.types.SpaceImageEditor.draw_handler_remove(self._handle, 'WINDOW')
+            self._handle = None
+        self._drawing = False
+
+    def draw_callback(self, context):
+        print("Drawing rectangle callback")
+        if not self._drawing:
+            return
+
+        x1, y1 = self._start_mouse
+        x2, y2 = self._end_mouse
+
+        vertices = [
+            (x1, y1), (x2, y1),
+            (x2, y2), (x1, y2)
+        ]
+        indices = [(0, 1), (1, 2), (2, 3), (3, 0)]
+
+        shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+        batch = batch_for_shader(shader, 'LINES', {"pos": vertices}, indices=indices)
+
+        gpu.state.line_width_set(2.0)
+        shader.bind()
+        shader.uniform_float("color", (1.0, 0.5, 0.0, 1.0))  # orange
+        batch.draw(shader)
 
 # Sidebar panel in the Image Editor or Viewport
 class PAINTSYSTEM_PT_ReferenceImagePanel(Panel):
@@ -31,6 +116,8 @@ class PAINTSYSTEM_PT_ReferenceImagePanel(Panel):
 
         layout.operator("paintsystem.open_reference_window", text="Open Image")
 
+        layout.operator("paintsystem.draw_rectangle", text="Draw Selection Box")
+
 
 # Optional floating popup viewer (not used in this method anymore)
 class PAINTSYSTEM_OT_ReferencePopup(Operator):
@@ -38,7 +125,7 @@ class PAINTSYSTEM_OT_ReferencePopup(Operator):
     bl_label = "Reference Image Viewer"
     bl_options = {'REGISTER'}
 
-    bl_region_type = 'WINDOW'  # 👈 Crucial for popup to work from 3D View
+    bl_region_type = 'WINDOW'  # Crucial for popup to work from 3D View
 
     def execute(self, context):
         return {'FINISHED'}
@@ -90,6 +177,23 @@ class PAINTSYSTEM_OT_OpenReferenceFloatingWindow(bpy.types.Operator):
                         if space.type == 'IMAGE_EDITOR':
                             space.image = image
                     break
+
+         # Automatically start rectangle tool
+        for window in context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type == 'IMAGE_EDITOR':
+                    for region in area.regions:
+                        if region.type == 'WINDOW':
+                            override = {
+                                "window": window,
+                                "screen": window.screen,
+                                "area": area,
+                                "region": region
+                            }
+                            with context.temp_override(**override):
+                                bpy.ops.paintsystem.draw_rectangle('INVOKE_DEFAULT')
+                            return {'FINISHED'}
+
         return {'FINISHED'}
 
     def invoke(self, context, event):
@@ -109,6 +213,7 @@ classes = (
     PAINTSYSTEM_PT_ReferenceImagePanel,
     #PAINTSYSTEM_OT_ReferencePopup,
     PAINTSYSTEM_OT_OpenReferenceFloatingWindow,
+    PAINTSYSTEM_OT_DrawRectangle,
 )
 
 def register():
