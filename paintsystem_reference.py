@@ -47,11 +47,76 @@ class PAINTSYSTEM_OT_DrawRectangle(Operator):
         elif event.type == 'MOUSEMOVE' and self._drawing:
             self._end_mouse = (event.mouse_region_x, event.mouse_region_y)
 
-        elif event.type in {'RIGHTMOUSE', 'ESC'}:
+        elif event.type == 'RIGHTMOUSE' and event.value == 'RELEASE':
+            if self._start_mouse and self._end_mouse:
+                self.crop_and_export(context)
             self.finish()
-            return {'CANCELLED'}
+            return {'FINISHED'}
 
         return {'RUNNING_MODAL'}
+    
+    def crop_and_export(self, context):
+        import numpy as np
+        import os
+
+        image = context.space_data.image
+        if not image or not image.has_data:
+            self.report({'ERROR'}, "No valid image found")
+            return
+
+        # Convert screen to image coordinates
+        def region_to_image_coords(region, rv3d, x, y):
+            return context.space_data.region_to_view(x, y)
+
+        x1, y1 = self._start_mouse
+        x2, y2 = self._end_mouse
+
+        # Ensure coordinates are properly ordered
+        xmin = min(x1, x2)
+        xmax = max(x1, x2)
+        ymin = min(y1, y2)
+        ymax = max(y1, y2)
+
+        sx = context.region.width
+        sy = context.region.height
+
+        ix = image.size[0]
+        iy = image.size[1]
+
+        # Normalize screen to 0-1 then to image resolution
+        px1 = int((xmin / sx) * ix)
+        py1 = int((ymin / sy) * iy)
+        px2 = int((xmax / sx) * ix)
+        py2 = int((ymax / sy) * iy)
+
+        width = px2 - px1
+        height = py2 - py1
+
+        if width <= 0 or height <= 0:
+            self.report({'ERROR'}, "Invalid selection size")
+            return
+
+        # Get pixel buffer
+        pixels = np.array(image.pixels[:], dtype=np.float32)
+        pixels = pixels.reshape((iy, ix, 4))  # RGBA
+
+        # Crop selection (image Y-axis is flipped)
+        cropped = pixels[iy - py2:iy - py1, px1:px2, :]
+
+        # Flatten for image.pixels
+        new_pixels = cropped[::-1].flatten()
+
+        # Create new image
+        new_image = bpy.data.images.new("Cropped_Image", width=width, height=height, alpha=True)
+        new_image.pixels = new_pixels.tolist()
+
+        # Save to disk
+        output_path = r"C:\Users\mdngu\Downloads\cropped_image.png"
+        new_image.filepath_raw = output_path
+        new_image.file_format = 'PNG'
+        new_image.save()
+
+        self.report({'INFO'}, f"Exported to: {output_path}")
 
     def invoke(self, context, event):
         print("Rectangle tool started")
