@@ -31,7 +31,17 @@ class PAINTSYSTEM_OT_DrawRectangle(Operator):
         if context.area:
             context.area.tag_redraw()
 
+        # Allow zoom and pan events to pass through to Blender
+        if event.type in {'WHEELUPMOUSE', 'WHEELDOWNMOUSE', 'MIDDLEMOUSE', 'PAN', 'TRACKPADPAN', 'TRACKPADZOOM'}:
+            return {'PASS_THROUGH'}
+
         if event.type == 'LEFTMOUSE':
+            # Only handle clicks inside the image region; pass through UI clicks
+            region = context.region
+            # The image region is usually type 'WINDOW', and mouse_region_x/y are relative to it
+            # If mouse is outside the region, pass through
+            if not (0 <= event.mouse_region_x < region.width and 0 <= event.mouse_region_y < region.height):
+                return {'PASS_THROUGH'}
             if event.value == 'PRESS':
                 self._start_mouse = (event.mouse_region_x, event.mouse_region_y)
                 self._end_mouse = self._start_mouse
@@ -53,58 +63,74 @@ class PAINTSYSTEM_OT_DrawRectangle(Operator):
             self.finish()
             return {'FINISHED'}
 
+
+        elif event.type == 'ESC':
+            self.finish()
+            self.report({'INFO'}, "Rectangle tool cancelled")
+            return {'CANCELLED'}
+
         return {'RUNNING_MODAL'}
     
+
     def crop_and_export(self, context):
         import numpy as np
-        import os
-
         image = context.space_data.image
         if not image or not image.has_data:
             self.report({'ERROR'}, "No valid image found")
             return
 
-        # Convert screen to image coordinates
-        def region_to_image_coords(region, rv3d, x, y):
-            return context.space_data.region_to_view(x, y)
-
-        x1, y1 = self._start_mouse
-        x2, y2 = self._end_mouse
-
-        # Ensure coordinates are properly ordered
-        xmin = min(x1, x2)
-        xmax = max(x1, x2)
-        ymin = min(y1, y2)
-        ymax = max(y1, y2)
-
-        sx = context.region.width
-        sy = context.region.height
-
+        region = context.region
+        v2d = region.view2d
         ix = image.size[0]
         iy = image.size[1]
 
-        # Normalize screen to 0-1 then to image resolution
-        px1 = int((xmin / sx) * ix)
-        py1 = int((ymin / sy) * iy)
-        px2 = int((xmax / sx) * ix)
-        py2 = int((ymax / sy) * iy)
+        # Convert region coords to image coords using Blender's API
+        def region_to_image(x, y):
+            # Use Blender's region_to_view to get normalized image-space coordinates (0-1)
+            uv_x, uv_y = v2d.region_to_view(x, y)
+            print(f"DEBUG: region ({x}, {y}) -> uv ({uv_x}, {uv_y})")
+            px = int(round(uv_x * ix))
+            py = int(round(uv_y * iy))
+            return px, py
 
-        width = px2 - px1
-        height = py2 - py1
+        # Get rectangle corners in region coords
+        x1, y1 = self._start_mouse
+        x2, y2 = self._end_mouse
+
+        # Map both corners to image pixel coords
+        px1, py1 = region_to_image(x1, y1)
+        px2, py2 = region_to_image(x2, y2)
+
+        # Clamp to image bounds BEFORE calculating width/height
+        px1 = max(0, min(ix, px1))
+        px2 = max(0, min(ix, px2))
+        py1 = max(0, min(iy, py1))
+        py2 = max(0, min(iy, py2))
+
+        # Ensure proper order
+        min_x = min(px1, px2)
+        max_x = max(px1, px2)
+        min_y = min(py1, py2)
+        max_y = max(py1, py2)
+
+        width = max_x - min_x
+        height = max_y - min_y
+
+        print(f"DEBUG: px1, py1 = {px1}, {py1}; px2, py2 = {px2}, {py2}")
+        print(f"DEBUG: min_x, max_x = {min_x}, {max_x}; min_y, max_y = {min_y}, {max_y}")
+        print(f"DEBUG: width, height = {width}, {height}")
 
         if width <= 0 or height <= 0:
-            self.report({'ERROR'}, "Invalid selection size")
+            self.report({'ERROR'}, f"Invalid selection size (width={width}, height={height})")
             return
 
         # Get pixel buffer
         pixels = np.array(image.pixels[:], dtype=np.float32)
         pixels = pixels.reshape((iy, ix, 4))  # RGBA
 
-        # Crop selection (image Y-axis is flipped)
-        cropped = pixels[iy - py2:iy - py1, px1:px2, :]
-
-        # Flatten for image.pixels
-        new_pixels = cropped[::-1].flatten()
+        # Crop selection (Y axis: 0 at bottom)
+        cropped = pixels[min_y:max_y, min_x:max_x, :]
+        new_pixels = cropped.flatten()
 
         # Create new image
         new_image = bpy.data.images.new("Cropped_Image", width=width, height=height, alpha=True)
@@ -140,6 +166,18 @@ class PAINTSYSTEM_OT_DrawRectangle(Operator):
             bpy.types.SpaceImageEditor.draw_handler_remove(self._handle, 'WINDOW')
             self._handle = None
         self._drawing = False
+        # Use a timer to restore the reference image after Blender's internal reassignment
+        def restore_image_later():
+            ref = bpy.context.scene.paintsystem_reference
+            if ref.reference_image:
+                for window in bpy.context.window_manager.windows:
+                    for area in window.screen.areas:
+                        if area.type == 'IMAGE_EDITOR':
+                            for space in area.spaces:
+                                if space.type == 'IMAGE_EDITOR':
+                                    space.image = ref.reference_image
+            return None  # Only run once
+        bpy.app.timers.register(restore_image_later, first_interval=0.1)
 
     def draw_callback(self, context):
         print("Drawing rectangle callback")
