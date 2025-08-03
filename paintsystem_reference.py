@@ -1,3 +1,42 @@
+import sys
+for mod in list(sys.modules):
+    if mod.startswith("PIL"):
+        sys.modules.pop(mod)
+
+import PIL.Image as Image
+sys.path.append(r"C:\Users\mdngu\AppData\Roaming\Python\Python311\site-packages")
+import torch
+import string
+try:
+    from transformers import BlipProcessor, BlipForConditionalGeneration
+    processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+    model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
+except ImportError:
+    processor = None
+    model = None
+
+def get_caption_and_keywords(image_path):
+    if processor is None or model is None:
+        print("BLIP model not available. Install transformers and dependencies.")
+        return None, []
+    image = Image.open(image_path).convert("RGB")
+    inputs = processor(image, return_tensors="pt")
+    outputs = model.generate(**inputs)
+    caption = processor.decode(outputs[0], skip_special_tokens=True)
+    # Keyword extraction
+    stopwords = {
+        "a", "an", "the", "with", "and", "or", "but", "if", "to", "of", "in", "on", "for", "at", "by", "from", "as", "is", "are", "was", "were"
+    }
+    tokens = caption.lower().translate(str.maketrans('', '', string.punctuation)).split()
+    keywords = [word for word in tokens if word not in stopwords]
+    seen = set()
+    unique_keywords = []
+    for word in keywords:
+        if word not in seen:
+            seen.add(word)
+            unique_keywords.append(word)
+    return caption, unique_keywords
+
 import bpy
 from bpy.types import Panel, Operator, PropertyGroup
 from bpy.props import PointerProperty
@@ -143,6 +182,12 @@ class PAINTSYSTEM_OT_DrawRectangle(Operator):
         new_image.save()
 
         self.report({'INFO'}, f"Exported to: {output_path}")
+
+        # Run BLIP captioning and keyword extraction
+        caption, keywords = get_caption_and_keywords(output_path)
+        if caption is not None:
+            print("Caption:", caption)
+            print("Keywords:", keywords)
 
     def invoke(self, context, event):
         print("Rectangle tool started")
