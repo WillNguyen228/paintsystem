@@ -20,7 +20,12 @@ def get_caption_and_keywords(image_path):
         print("BLIP model not available. Install transformers and dependencies.")
         return None, []
     image = Image.open(image_path).convert("RGB")
-    inputs = processor(image, return_tensors="pt")
+    image = image.copy()  # <-- forces memory safety
+    print("Image type:", type(image))
+    print("Image mode:", image.mode)
+    print("Image size:", image.size)
+    print("Image path:", image_path)
+    inputs = processor(images=image, return_tensors="pt")
     outputs = model.generate(**inputs)
     caption = processor.decode(outputs[0], skip_special_tokens=True)
     # Keyword extraction
@@ -188,6 +193,38 @@ class PAINTSYSTEM_OT_DrawRectangle(Operator):
         if caption is not None:
             print("Caption:", caption)
             print("Keywords:", keywords)
+        
+        # If keywords are available, use the first one to trigger BlenderKit search
+        if keywords:
+            first_keyword = keywords[0]
+            if any("blenderkit" in name for name in bpy.context.preferences.addons.keys()):
+                def blenderkit_search(search_term):
+                    """
+                    Performs a search using BlenderKit.
+
+                    Args:
+                        search_term (str): The term to search for.
+                    """
+
+                    # Access the BlenderKit context
+                    bk = bpy.context.scene.blenderkit
+
+                    # Check if the assetbar exists and is not None
+                    if hasattr(bk, 'assetbar') and bk.assetbar:
+                        # Perform the search
+                        bk.assetbar.search(search_term)
+
+                        # Access search results. Iterate through assets, print some info
+                        limited_assets = bk.assetbar.assets[:20]
+                        for asset in limited_assets:
+                            print(f"Asset ID: {asset.asset_id}, Name: {asset.name}, Type: {asset.asset_type}")
+                    else:
+                        print("BlenderKit assetbar not found. Make sure the add-on is enabled and initialized.")
+
+                print("Searching BlenderKit for: ", first_keyword)
+                blenderkit_search(first_keyword)
+            else:
+                self.report({'WARNING'}, "BlenderKit addon not enabled")
 
     def invoke(self, context, event):
         print("Rectangle tool started")
