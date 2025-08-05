@@ -198,16 +198,41 @@ class PAINTSYSTEM_OT_DrawRectangle(Operator):
 
         self.report({'INFO'}, f"Exported to: {output_path}")
 
+        from bl_ext.user_default.blenderkit import global_vars, search  # Fixed import
+
+        def create_new_blenderkit_tab(name="search"):
+            tabs = global_vars.TABS["tabs"]
+            new_tab = {
+                "name": name,
+                "history": [],
+                "history_index": 0
+            }
+
+            tabs.append(new_tab)
+            global_vars.TABS["active_tab"] = len(tabs) - 1
+            search.create_history_step(new_tab)
+
+        def search_each_keyword_as_tab(keywords):
+            if "blenderkit" not in bpy.context.preferences.addons:
+                print("BlenderKit addon not enabled")
+                return
+
+            for keyword in keywords:
+                create_new_blenderkit_tab(name=keyword)
+                bpy.ops.view3d.blenderkit_search('INVOKE_DEFAULT', keywords=keyword)
+                print(f"Searched: {keyword}")
+
         # Run BLIP captioning and keyword extraction
         caption, keywords = get_caption_and_keywords(output_path)
         if caption is not None:
             print("Caption:", caption)
             print("Keywords:", keywords)
         
-        ## Search BlenderKit using only the first keyword
         if keywords:
-            first_keyword = keywords[0]
+            search_each_keyword_as_tab(keywords)
             
+        """
+        if keywords:           
             if any(key.endswith("blenderkit") for key in bpy.context.preferences.addons.keys()):
                 print("BlenderKit addon enabled")
                 for kw in keywords:
@@ -215,6 +240,7 @@ class PAINTSYSTEM_OT_DrawRectangle(Operator):
                     bpy.ops.view3d.blenderkit_search(keywords=kw)
             else:
                 print("BlenderKit addon NOT enabled")
+        """
 
     def invoke(self, context, event):
         print("Rectangle tool started")
